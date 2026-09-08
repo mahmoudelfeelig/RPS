@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, authorize } = require('../middleware/auth');
 const economy = require('../controllers/economyController');
 
 const router = express.Router();
@@ -10,9 +10,14 @@ router.post('/cards/open-pack', authenticate, economy.openCardPack);
 router.post('/cards/upgrade', authenticate, economy.upgradeCard);
 router.post('/craft', authenticate, economy.craft);
 
-router.post('/auctions', authenticate, economy.createAuction);
+router.post('/auctions', authenticate, authorize('admin', 'game-master'), economy.createAuction);
 router.post('/auctions/:id/bid', authenticate, economy.bidAuction);
-router.post('/auctions/:id/settle', authenticate, economy.settleAuction);
+router.post(
+  '/auctions/:id/settle',
+  authenticate,
+  authorize('admin', 'game-master'),
+  economy.settleAuction
+);
 
 router.post('/loans', authenticate, economy.borrowLoan);
 router.post('/loans/:id/repay', authenticate, economy.repayLoan);

@@ -22,6 +22,7 @@ export default function Profile() {
   const [showEditFields, setShowEditFields] = useState(false);
   const [username, setUsername] = useState(user?.username || '');
   const [password, setPassword] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
   const [image, setImage] = useState(getProfileImage(user));
   const [imageFile, setImageFile] = useState(null);
   const [profileImageUrl, setProfileImageUrl] = useState('');
@@ -63,7 +64,12 @@ export default function Profile() {
 
   const getPasswordStrength = (value) => {
     if (!value) return '';
-    if (value.length >= 12 && /[A-Z]/.test(value) && /\d/.test(value) && /[^A-Za-z0-9]/.test(value)) {
+    if (
+      value.length >= 12 &&
+      /[A-Z]/.test(value) &&
+      /\d/.test(value) &&
+      /[^A-Za-z0-9]/.test(value)
+    ) {
       return 'strong';
     }
     if (value.length >= 8) return 'medium';
@@ -75,7 +81,10 @@ export default function Profile() {
     try {
       const formData = new FormData();
       if (username !== user.username) formData.append('username', username);
-      if (password) formData.append('password', password);
+      if (password) {
+        formData.append('password', password);
+        formData.append('currentPassword', currentPassword);
+      }
       if (profileImageUrl) formData.append('profileImageUrl', profileImageUrl.trim());
       if (imageFile) formData.append('image', imageFile);
 
@@ -90,9 +99,10 @@ export default function Profile() {
         throw new Error(data.message || 'Update failed');
       }
 
-      login({ token, user: data });
+      login({ token: data.token || token, user: data.user });
       toast.success('Profile updated');
       setPassword('');
+      setCurrentPassword('');
       if (previewRef.current) {
         URL.revokeObjectURL(previewRef.current);
         previewRef.current = null;
@@ -161,12 +171,16 @@ export default function Profile() {
         <PageHero
           title="Account settings"
           description="Manage your username, password, profile image, and account access from one place."
-          actions={(
+          actions={
             <>
-              <StatCard label="Balance" value={`${(user?.balance ?? 0).toLocaleString()} coins`} tone="text-emerald-100" />
+              <StatCard
+                label="Balance"
+                value={`${(user?.balance ?? 0).toLocaleString()} coins`}
+                tone="text-emerald-100"
+              />
               <StatCard label="Role" value={user?.role || 'user'} tone="text-cyan-100" />
             </>
-          )}
+          }
         />
 
         <section className="rounded-[32px] border border-white/10 bg-white/[0.06] p-6 shadow-2xl backdrop-blur-2xl">
@@ -177,11 +191,16 @@ export default function Profile() {
                   src={getProfileImage(user)}
                   alt="Profile"
                   className="h-full w-full object-cover"
-                  onError={(e) => { e.currentTarget.src = fallbackAvatar; }}
+                  onError={(e) => {
+                    e.currentTarget.src = fallbackAvatar;
+                  }}
                 />
               </div>
               <div>
-                <Link to={`/profile/${user?.username}`} className="text-lg font-semibold text-white hover:underline">
+                <Link
+                  to={`/profile/${user?.username}`}
+                  className="text-lg font-semibold text-white hover:underline"
+                >
                   @{user.username}
                 </Link>
                 <p className="mt-1 text-sm text-white/55">
@@ -224,7 +243,12 @@ export default function Profile() {
                   <div className="font-medium text-white">Upload profile image or GIF</div>
                   <div className="text-sm text-white/50">Choose a local file from your device.</div>
                 </div>
-                <input type="file" className="hidden" accept="image/*" onChange={handleImageChange} />
+                <input
+                  type="file"
+                  className="hidden"
+                  accept="image/*"
+                  onChange={handleImageChange}
+                />
               </label>
 
               <input
@@ -255,6 +279,14 @@ export default function Profile() {
               <div className="relative">
                 <input
                   type={passwordVisible ? 'text' : 'password'}
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  placeholder="Current password"
+                  autoComplete="current-password"
+                  className="mb-3 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-white outline-none transition focus:border-blue-400"
+                />
+                <input
+                  type={passwordVisible ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => {
                     const val = e.target.value;
@@ -262,6 +294,7 @@ export default function Profile() {
                     setPasswordStrength(getPasswordStrength(val));
                   }}
                   placeholder="New password"
+                  autoComplete="new-password"
                   className="w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 pr-12 text-white outline-none transition focus:border-blue-400"
                 />
                 <button
@@ -274,12 +307,18 @@ export default function Profile() {
               </div>
 
               {password && (
-                <p className={`text-sm font-medium ${passwordStrength === 'strong' ? 'text-green-400' : passwordStrength === 'medium' ? 'text-yellow-400' : 'text-red-400'}`}>
+                <p
+                  className={`text-sm font-medium ${passwordStrength === 'strong' ? 'text-green-400' : passwordStrength === 'medium' ? 'text-yellow-400' : 'text-red-400'}`}
+                >
                   Password strength: {passwordStrength}
                 </p>
               )}
 
-              <Button onClick={handleSave} disabled={isLoading} className="w-full bg-emerald-600 text-white hover:bg-emerald-500">
+              <Button
+                onClick={handleSave}
+                disabled={isLoading}
+                className="w-full bg-emerald-600 text-white hover:bg-emerald-500"
+              >
                 Save changes
               </Button>
             </div>
@@ -291,7 +330,9 @@ export default function Profile() {
             <Trash2 className="mt-0.5 h-4 w-4" />
             <div>
               <div className="font-semibold">Account deletion</div>
-              <p className="mt-1 text-red-100/70">Delete your account permanently. This cannot be undone.</p>
+              <p className="mt-1 text-red-100/70">
+                Delete your account permanently. This cannot be undone.
+              </p>
             </div>
           </div>
           <form onSubmit={handleDeleteAccount} className="mt-4 grid gap-3">

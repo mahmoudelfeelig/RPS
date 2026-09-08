@@ -39,7 +39,6 @@ backend/
 
 ## Runtime Notes
 
-- `backend/index.js` serves the frontend public assets when the app is hosted together.
+- `backend/index.js` serves API routes, backend static assets, and uploaded files. The production frontend is built and served by the root Nginx image.
 - `backend/public/assets/avatars/default-avatar.png` is the shared avatar fallback.
 - `backend/routes/games.js` contains the RPS, spinner, casino, puzzle, and click-frenzy routes.
-

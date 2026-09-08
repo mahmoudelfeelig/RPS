@@ -50,5 +50,4 @@ frontend/
 - `public/assets/avatars/default-avatar.png` is the shared profile fallback.
 - `public/assets/sounds/success.mp3` is the shared success sound.
 - Use Node 20 or newer.
-- On Windows, run the project from WSL2 or a native terminal. WSL1 breaks `npm` here before the app can build.
-- Before editing, prefer `npm run lint` and `npm run build` from `frontend/` when the local runtime supports Node.
+- Run `npm run lint` and `npm run build` from `frontend/` before publishing frontend changes.

@@ -1,21 +1,19 @@
-const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const User = require('../models/User');
 const checkAndAwardBadges = require('../utils/checkAndAwardBadges');
 const checkAndAwardAchievements = require('../utils/checkAndAwardAchievements');
 const { sendVerificationEmail, sendPasswordResetEmail } = require('../utils/mailer');
-
-const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '7d' });
-};
+const generateToken = require('../utils/authToken');
 
 const generateVerificationCode = () => String(crypto.randomInt(100000, 1000000));
 
 const isSameDay = (d1, d2) => {
-  return d1.getUTCFullYear() === d2.getUTCFullYear() &&
-         d1.getUTCMonth() === d2.getUTCMonth() &&
-         d1.getUTCDate() === d2.getUTCDate();
+  return (
+    d1.getUTCFullYear() === d2.getUTCFullYear() &&
+    d1.getUTCMonth() === d2.getUTCMonth() &&
+    d1.getUTCDate() === d2.getUTCDate()
+  );
 };
 
 exports.register = async (req, res) => {
@@ -23,7 +21,7 @@ exports.register = async (req, res) => {
     const { username, email, password } = req.body;
     const normalizedEmail = (email || '').trim().toLowerCase();
 
-    const existingUser = await User.findOne({ username  });
+    const existingUser = await User.findOne({ username });
     if (existingUser) return res.status(400).json({ message: 'Username already taken' });
     if (!normalizedEmail) return res.status(400).json({ message: 'Email is required' });
 
@@ -70,7 +68,7 @@ exports.register = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const { username, password } = req.body;
-    const user = await User.findOne({ username }).select('+password');
+    const user = await User.findOne({ username }).select('+password +tokenVersion');
 
     if (!user) return res.status(400).json({ message: 'Wrong Username' });
 
@@ -103,9 +101,9 @@ exports.login = async (req, res) => {
     await checkAndAwardBadges(user._id);
     await checkAndAwardAchievements(user._id);
 
-    const token = generateToken(user._id);
+    const token = generateToken(user);
 
-    const { password: _, ...userData } = user.toObject();
+    const { password: _, tokenVersion: __, ...userData } = user.toObject();
     res.json({ token, user: userData });
   } catch (err) {
     console.error('Login error:', err);
@@ -122,13 +120,16 @@ exports.verifyEmail = async (req, res) => {
       return res.status(400).json({ message: 'Email and code or token are required' });
     }
 
-    const user = await User.findOne({ email: normalizedEmail }).select('+emailVerificationCode +emailVerificationToken');
+    const user = await User.findOne({ email: normalizedEmail }).select(
+      '+emailVerificationCode +emailVerificationToken +tokenVersion'
+    );
     if (!user) return res.status(404).json({ message: 'Account not found' });
     if (user.emailVerified) {
       return res.json({ message: 'Email already verified' });
     }
 
-    const expired = user.emailVerificationExpiresAt && user.emailVerificationExpiresAt.getTime() < Date.now();
+    const expired =
+      user.emailVerificationExpiresAt && user.emailVerificationExpiresAt.getTime() < Date.now();
     if (expired) {
       return res.status(400).json({ message: 'Verification code expired' });
     }
@@ -146,8 +147,8 @@ exports.verifyEmail = async (req, res) => {
     user.emailVerificationExpiresAt = null;
     await user.save();
 
-    const authToken = generateToken(user._id);
-    const { password: __, ...userData } = user.toObject();
+    const authToken = generateToken(user);
+    const { password: __, tokenVersion: ___, ...userData } = user.toObject();
     res.json({
       message: 'Email verified successfully',
       token: authToken,
@@ -167,7 +168,9 @@ exports.resendVerification = async (req, res) => {
       return res.status(400).json({ message: 'Email is required' });
     }
 
-    const user = await User.findOne({ email: normalizedEmail }).select('+emailVerificationCode +emailVerificationToken');
+    const user = await User.findOne({ email: normalizedEmail }).select(
+      '+emailVerificationCode +emailVerificationToken'
+    );
     if (!user) return res.status(404).json({ message: 'Account not found' });
     if (user.emailVerified) {
       return res.status(400).json({ message: 'Email already verified' });
@@ -202,7 +205,9 @@ exports.requestPasswordReset = async (req, res) => {
     const normalizedEmail = (email || '').trim().toLowerCase();
     if (!normalizedEmail) return res.status(400).json({ message: 'Email is required' });
 
-    const user = await User.findOne({ email: normalizedEmail }).select('+passwordResetCode +passwordResetToken');
+    const user = await User.findOne({ email: normalizedEmail }).select(
+      '+passwordResetCode +passwordResetToken'
+    );
     if (!user) {
       return res.json({ message: 'If that email exists, a reset code has been sent.' });
     }
@@ -214,8 +219,9 @@ exports.requestPasswordReset = async (req, res) => {
     user.passwordResetExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
     await user.save();
 
-    const resetBase = process.env.PASSWORD_RESET_BASE_URL
-      || `${(process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '')}/reset-password`;
+    const resetBase =
+      process.env.PASSWORD_RESET_BASE_URL ||
+      `${(process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '')}/reset-password`;
     const resetUrl = `${resetBase}?email=${encodeURIComponent(normalizedEmail)}&token=${resetToken}`;
 
     await sendPasswordResetEmail({
@@ -236,15 +242,20 @@ exports.resetPassword = async (req, res) => {
     const { email, code, token, password } = req.body;
     const normalizedEmail = (email || '').trim().toLowerCase();
     if (!normalizedEmail || (!code && !token) || !password) {
-      return res.status(400).json({ message: 'Email, reset code or token, and password are required' });
+      return res
+        .status(400)
+        .json({ message: 'Email, reset code or token, and password are required' });
     }
     if (String(password).length < 8) {
       return res.status(400).json({ message: 'Password must be at least 8 characters' });
     }
 
-    const user = await User.findOne({ email: normalizedEmail }).select('+password +passwordResetCode +passwordResetToken');
+    const user = await User.findOne({ email: normalizedEmail }).select(
+      '+password +passwordResetCode +passwordResetToken +tokenVersion'
+    );
     if (!user) return res.status(400).json({ message: 'Invalid or expired reset code' });
-    const expired = user.passwordResetExpiresAt && user.passwordResetExpiresAt.getTime() < Date.now();
+    const expired =
+      user.passwordResetExpiresAt && user.passwordResetExpiresAt.getTime() < Date.now();
     if (expired) return res.status(400).json({ message: 'Reset code expired' });
 
     const codeMatches = code && user.passwordResetCode === String(code).trim();
@@ -258,10 +269,11 @@ exports.resetPassword = async (req, res) => {
     user.passwordResetToken = null;
     user.passwordResetExpiresAt = null;
     user.emailVerified = true;
+    user.tokenVersion = Number(user.tokenVersion || 0) + 1;
     await user.save();
 
-    const authToken = generateToken(user._id);
-    const { password: _, ...userData } = user.toObject();
+    const authToken = generateToken(user);
+    const { password: _, tokenVersion: __, ...userData } = user.toObject();
     res.json({ message: 'Password reset successfully', token: authToken, user: userData });
   } catch (err) {
     console.error('resetPassword error:', err);

@@ -15,8 +15,8 @@ const RPS_CHOICES = ['rock', 'paper', 'scissors'];
 const RPS_BEATS = { rock: 'scissors', paper: 'rock', scissors: 'paper' };
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-const chance = probability => Math.random() < probability;
-const pick = values => values[Math.floor(Math.random() * values.length)];
+const chance = (probability) => Math.random() < probability;
+const pick = (values) => values[Math.floor(Math.random() * values.length)];
 
 function weightedPick(weights = {}) {
   const entries = Object.entries(weights).filter(([, weight]) => Number(weight) > 0);
@@ -64,13 +64,13 @@ async function ensureEconomyBots() {
           archetype: bot.archetype,
           risk: bot.risk,
           activity: bot.activity,
-          spending: bot.spending
+          spending: bot.spending,
         },
         games: {
           unlocked: ['casino', 'minefield', 'click-frenzy', 'rps', 'puzzle-rush'],
           nguLevel: 1,
-          nguRate: 1
-        }
+          nguRate: 1,
+        },
       });
       continue;
     }
@@ -81,7 +81,7 @@ async function ensureEconomyBots() {
       risk: bot.risk,
       activity: bot.activity,
       spending: bot.spending,
-      lastSimulatedAt: existing.botProfile?.lastSimulatedAt || null
+      lastSimulatedAt: existing.botProfile?.lastSimulatedAt || null,
     };
     await existing.save();
   }
@@ -99,7 +99,10 @@ async function simulateStore(user, bot, storeItems) {
   if (!storeItems.length || !chance(0.12 + bot.spending * 0.28)) return;
 
   const affordable = storeItems
-    .filter(item => item.stock > 0 && item.price <= user.balance * clamp(0.08 + bot.spending * 0.28, 0.08, 0.38))
+    .filter(
+      (item) =>
+        item.stock > 0 && item.price <= user.balance * clamp(0.08 + bot.spending * 0.28, 0.08, 0.38)
+    )
     .sort((a, b) => b.price - a.price);
 
   const item = affordable[0] || null;
@@ -108,7 +111,7 @@ async function simulateStore(user, bot, storeItems) {
   user.balance -= item.price;
   user.storePurchases += 1;
   user.inventory = user.inventory || [];
-  const existing = user.inventory.find(slot => String(slot.item) === String(item._id));
+  const existing = user.inventory.find((slot) => String(slot.item) === String(item._id));
   if (existing) {
     existing.quantity += 1;
   } else {
@@ -128,17 +131,17 @@ async function simulateMarkets(user, bot, assets, assetMap) {
   const maxExposure = Math.max(1500, user.balance * (0.18 + bot.risk * 0.38));
 
   if (user.balance > 600 && currentValue < maxExposure && chance(0.32 + bot.activity * 0.26)) {
-    const preferred = assets.filter(asset => bot.marketBias.includes(asset.category));
+    const preferred = assets.filter((asset) => bot.marketBias.includes(asset.category));
     const asset = pick(preferred.length ? preferred : assets);
     const budget = user.balance * clamp(0.05 + bot.risk * 0.12, 0.04, 0.2);
     const quantity = Math.max(1, Math.floor(budget / asset.currentPrice));
     const cost = quantity * asset.currentPrice;
 
     if (quantity > 0 && cost <= user.balance) {
-      const position = user.portfolio.find(pos => pos.symbol === asset.symbol);
+      const position = user.portfolio.find((pos) => pos.symbol === asset.symbol);
       if (position) {
         const totalQuantity = position.quantity + quantity;
-        position.avgPrice = ((position.avgPrice * position.quantity) + cost) / totalQuantity;
+        position.avgPrice = (position.avgPrice * position.quantity + cost) / totalQuantity;
         position.quantity = totalQuantity;
         position.dividendYield = asset.dividendYield;
       } else {
@@ -149,7 +152,7 @@ async function simulateMarkets(user, bot, assets, assetMap) {
           quantity,
           avgPrice: asset.currentPrice,
           dividendYield: asset.dividendYield,
-          lastDividendAt: null
+          lastDividendAt: null,
         });
       }
       user.balance -= cost;
@@ -170,7 +173,7 @@ async function simulateMarkets(user, bot, assets, assetMap) {
       user.marketTrades += 1;
       asset.volume += sold;
       await asset.save();
-      user.portfolio = user.portfolio.filter(pos => pos.quantity > 0);
+      user.portfolio = user.portfolio.filter((pos) => pos.quantity > 0);
     }
   }
 
@@ -195,7 +198,10 @@ async function simulateGames(user, bot, rpsAssets) {
 
   for (let i = 0; i < plays; i += 1) {
     const game = pick(bot.gameBias);
-    const stake = Math.max(25, Math.round(40 + user.balance * clamp(0.004 + bot.risk * 0.006, 0.004, 0.012)));
+    const stake = Math.max(
+      25,
+      Math.round(40 + user.balance * clamp(0.004 + bot.risk * 0.006, 0.004, 0.012))
+    );
 
     if (game === 'rps') {
       const opponent = pick(RPS_BOTS);
@@ -220,7 +226,7 @@ async function simulateGames(user, bot, rpsAssets) {
         buyIn: stake,
         yourPick,
         theirPick,
-        outcome
+        outcome,
       });
       user.rpsHistory = user.rpsHistory.slice(-30);
 
@@ -265,23 +271,25 @@ async function simulateGames(user, bot, rpsAssets) {
 }
 
 async function runBotSimulation() {
-  if (process.env.BOT_SIMULATION_ENABLED === 'false' || process.env.ECONOMY_BOTS_ENABLED === 'false') return;
+  if (process.env.BOT_SIMULATION_ENABLED !== 'true' || process.env.ECONOMY_BOTS_ENABLED !== 'true')
+    return;
 
   await ensureEconomyBots();
 
   const [bots, storeItems, assets] = await Promise.all([
     User.find({ isBot: true, status: 'active' }),
     StoreItem.find({ active: true, stock: { $gt: 0 } }).sort({ price: 1 }),
-    MarketAsset.find({ active: { $ne: false } })
+    MarketAsset.find({ active: { $ne: false } }),
   ]);
 
   if (!bots.length) return;
 
-  const assetMap = new Map(assets.map(asset => [asset.symbol, asset]));
-  const rpsAssets = assets.filter(asset => asset.category === 'rps-member');
+  const assetMap = new Map(assets.map((asset) => [asset.symbol, asset]));
+  const rpsAssets = assets.filter((asset) => asset.category === 'rps-member');
 
   for (const user of bots) {
-    const bot = ECONOMY_BOTS.find(profile => profile.username === user.username) || ECONOMY_BOTS[0];
+    const bot =
+      ECONOMY_BOTS.find((profile) => profile.username === user.username) || ECONOMY_BOTS[0];
     simulateEarnings(user, bot);
     await simulateMarkets(user, bot, assets, assetMap);
     await simulateStore(user, bot, storeItems);
@@ -292,7 +300,7 @@ async function runBotSimulation() {
       risk: bot.risk,
       activity: bot.activity,
       spending: bot.spending,
-      lastSimulatedAt: new Date()
+      lastSimulatedAt: new Date(),
     };
 
     await user.save();
@@ -302,8 +310,8 @@ async function runBotSimulation() {
         $set: {
           rpsWins: user.rpsWins || 0,
           rpsGames: user.rpsPlays || 0,
-          puzzleRushTotal: user.puzzleSolves || 0
-        }
+          puzzleRushTotal: user.puzzleSolves || 0,
+        },
       },
       { upsert: true, setDefaultsOnInsert: true }
     );
@@ -311,11 +319,13 @@ async function runBotSimulation() {
     await checkAndAwardAchievements(user._id);
   }
 
-  console.log(`[${new Date().toISOString()}] Economy bot simulation processed ${bots.length} bot players.`);
+  console.log(
+    `[${new Date().toISOString()}] Economy bot simulation processed ${bots.length} bot players.`
+  );
 }
 
 cron.schedule(process.env.BOT_SIMULATION_CRON || '*/5 * * * *', () => {
-  runBotSimulation().catch(err => {
+  runBotSimulation().catch((err) => {
     console.error('Bot simulation failed:', err);
   });
 });

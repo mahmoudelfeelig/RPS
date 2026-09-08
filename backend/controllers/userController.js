@@ -3,13 +3,13 @@ const UserInventory = require('../models/UserInventory');
 const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
 const checkAndAwardBadges = require('../utils/checkAndAwardBadges');
-const checkAndAwardAchievements= require('../utils/checkAndAwardAchievements');
+const checkAndAwardAchievements = require('../utils/checkAndAwardAchievements');
 const { publicUploadUrl } = require('../utils/uploadStorage');
+const generateToken = require('../utils/authToken');
 
 exports.getMe = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id)
-      .select('username balance profileImage');
+    const user = await User.findById(req.user.id).select('username balance profileImage');
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const inv = await UserInventory.findOneAndUpdate(
@@ -27,12 +27,12 @@ exports.getMe = async (req, res) => {
       balance: user.balance,
       profileImage: user.profileImage,
       resources: {
-        coins:  inv.resources.coins,
-        food:   Object.fromEntries(inv.resources.food),
-        toys:   Object.fromEntries(inv.resources.toys),
+        coins: inv.resources.coins,
+        food: Object.fromEntries(inv.resources.food),
+        toys: Object.fromEntries(inv.resources.toys),
         shards: inv.shards,
-        nextClaim: Math.max(0, nextClaim - now)
-      }
+        nextClaim: Math.max(0, nextClaim - now),
+      },
     });
   } catch (err) {
     console.error('getMe error:', err);
@@ -40,13 +40,12 @@ exports.getMe = async (req, res) => {
   }
 };
 
-
 exports.updateUser = async (req, res) => {
   try {
     const userId = req.user.id;
-    const user = await User.findById(userId);
+    const user = await User.findById(userId).select('+password +tokenVersion');
 
-    const { username, password, profileImageUrl, avatarUrl } = req.body;
+    const { username, password, currentPassword, profileImageUrl, avatarUrl } = req.body;
     const updates = {};
 
     if (username && username !== user.username) {
@@ -56,7 +55,14 @@ exports.updateUser = async (req, res) => {
     }
 
     if (password) {
+      if (String(password).length < 8) {
+        return res.status(400).json({ message: 'Password must be at least 8 characters' });
+      }
+      if (!currentPassword || !(await bcrypt.compare(currentPassword, user.password))) {
+        return res.status(400).json({ message: 'Current password is incorrect' });
+      }
       updates.password = await bcrypt.hash(password, 10);
+      updates.tokenVersion = Number(user.tokenVersion || 0) + 1;
     }
 
     const remoteImage = (profileImageUrl || avatarUrl || '').trim();
@@ -68,9 +74,15 @@ exports.updateUser = async (req, res) => {
       updates.profileImage = publicUploadUrl(req.file);
     }
 
-    const updatedUser = await User.findByIdAndUpdate(userId, updates, { new: true }).select('-password');
-    res.json(updatedUser);
-
+    const updatedUser = await User.findByIdAndUpdate(userId, updates, { new: true }).select(
+      '-password +tokenVersion'
+    );
+    const userData = updatedUser.toObject();
+    delete userData.tokenVersion;
+    if (password) {
+      return res.json({ user: userData, token: generateToken(updatedUser) });
+    }
+    res.json({ user: userData });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Failed to update user' });
@@ -86,7 +98,7 @@ exports.deleteUser = async (req, res) => {
 
   await Promise.all([
     User.findByIdAndDelete(req.user.id),
-    UserInventory.deleteOne({ userId: req.user.id })
+    UserInventory.deleteOne({ userId: req.user.id }),
   ]);
   res.json({ message: 'Account deleted' });
 };
@@ -101,15 +113,15 @@ exports.getLeaderboard = async (req, res) => {
         populate: {
           path: 'item',
           model: 'StoreItem',
-          select: 'name emoji image' 
-        }
+          select: 'name emoji image',
+        },
       })
       .populate('achievements', 'title icon')
       .lean();
 
-    const out = users.map(u => ({
+    const out = users.map((u) => ({
       ...u,
-      inventory: (u.inventory || []).map(({ item, quantity }) => ({ item, quantity }))
+      inventory: (u.inventory || []).map(({ item, quantity }) => ({ item, quantity })),
     }));
 
     res.json(out);
@@ -149,14 +161,15 @@ exports.sendMoney = async (req, res) => {
           transactionHistory: {
             type: 'send',
             amount: numericAmount,
-            to: recipient._id
-          }
-        }
+            to: recipient._id,
+          },
+        },
       },
       { session }
     );
 
-    if (senderDebit.modifiedCount !== 1) return res.status(400).json({ message: 'Insufficient funds' });
+    if (senderDebit.modifiedCount !== 1)
+      return res.status(400).json({ message: 'Insufficient funds' });
 
     await User.updateOne(
       { _id: recipient._id },
@@ -166,9 +179,9 @@ exports.sendMoney = async (req, res) => {
           transactionHistory: {
             type: 'receive',
             amount: numericAmount,
-            from: senderId
-          }
-        }
+            from: senderId,
+          },
+        },
       },
       { session }
     );
@@ -191,7 +204,7 @@ exports.searchUsers = async (req, res) => {
     const safe = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const users = await User.find({
       _id: { $ne: req.user.id },
-      username: { $regex: safe, $options: 'i' }
+      username: { $regex: safe, $options: 'i' },
     })
       .select('username profileImage balance isBot')
       .sort({ username: 1 })
@@ -216,12 +229,13 @@ exports.getStats = async (req, res) => {
         populate: {
           path: 'item',
           model: 'StoreItem',
-          select: 'name type emoji image description price effect effectType effectValue consumable'
-        }
+          select:
+            'name type emoji image description price effect effectType effectValue consumable',
+        },
       })
       .populate({
         path: 'currentBets',
-        select: 'title options predictions result'
+        select: 'title options predictions result',
       })
       .lean();
 
@@ -229,40 +243,42 @@ exports.getStats = async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    const inventory = (user.inventory || []).map(({ item, quantity }) => ({ item, quantity })).filter(entry => entry.item);
+    const inventory = (user.inventory || [])
+      .map(({ item, quantity }) => ({ item, quantity }))
+      .filter((entry) => entry.item);
 
     const stats = {
-      username:            user.username,
-      betsPlaced:          user.betsPlaced,
-      betsWon:             user.betsWon,
-      storePurchases:      user.storePurchases,
-      marketTrades:        user.marketTrades || 0,
-      dividendsClaimed:    user.dividendsClaimed || 0,
-      logins:              user.loginCount,
-      role:                user.role,
-      tasksCompleted:      user.tasksCompleted,
-      balance:             user.balance,
-      prestigeLevel:       user.prestigeLevel,
-      prestigeResets:      user.prestigeResets,
-      prestigeMultiplier:  user.prestigeMultiplier,
-      lastPrestigeAt:      user.lastPrestigeAt,
-      portfolio:           user.portfolio || [],
-      claimedAchievements: user.achievements   || [],
-      badges:              user.badges         || [],
-      currentBets:         user.currentBets    || [],
-      profileImage:     user.profileImage,
+      username: user.username,
+      betsPlaced: user.betsPlaced,
+      betsWon: user.betsWon,
+      storePurchases: user.storePurchases,
+      marketTrades: user.marketTrades || 0,
+      dividendsClaimed: user.dividendsClaimed || 0,
+      logins: user.loginCount,
+      role: user.role,
+      tasksCompleted: user.tasksCompleted,
+      balance: user.balance,
+      prestigeLevel: user.prestigeLevel,
+      prestigeResets: user.prestigeResets,
+      prestigeMultiplier: user.prestigeMultiplier,
+      lastPrestigeAt: user.lastPrestigeAt,
+      portfolio: user.portfolio || [],
+      claimedAchievements: user.achievements || [],
+      badges: user.badges || [],
+      currentBets: user.currentBets || [],
+      profileImage: user.profileImage,
       inventory,
-      activeEffects:   user.activeEffects || [],
-      minefieldPlays:   user.minefieldPlays,
-      minefieldWins:    user.minefieldWins,
-      puzzleSolves:     user.puzzleSolves,
-      rpsPlays:        user.rpsPlays,
-      rpsWins:         user.rpsWins,
+      activeEffects: user.activeEffects || [],
+      minefieldPlays: user.minefieldPlays,
+      minefieldWins: user.minefieldWins,
+      puzzleSolves: user.puzzleSolves,
+      rpsPlays: user.rpsPlays,
+      rpsWins: user.rpsWins,
       clickFrenzyClicks: user.clickFrenzyClicks,
-      casinoPlays:     user.casinoPlays,
-      casinoWins:      user.casinoWins,
-      slotsPlays:      user.slotsPlays,
-      slotsWins:       user.slotsWins,
+      casinoPlays: user.casinoPlays,
+      casinoWins: user.casinoWins,
+      slotsPlays: user.slotsPlays,
+      slotsWins: user.slotsWins,
     };
 
     res.json({ userId: req.user.id, ...stats });
@@ -283,8 +299,8 @@ exports.getPublicProfile = async (req, res) => {
         populate: {
           path: 'item',
           model: 'StoreItem',
-          select: 'name type emoji image description price'
-        }
+          select: 'name type emoji image description price',
+        },
       })
       .populate('achievements')
       .populate('badges')
@@ -296,16 +312,16 @@ exports.getPublicProfile = async (req, res) => {
 
     const inventory = (user.inventory || [])
       .map(({ item, quantity }) => ({ item, quantity }))
-      .filter(entry => entry.item);
-    const badges = (user.badges || []).filter(b => typeof b === 'object');
+      .filter((entry) => entry.item);
+    const badges = (user.badges || []).filter((b) => typeof b === 'object');
 
     res.json({
-      username:     user.username,
-      balance:      user.balance,
+      username: user.username,
+      balance: user.balance,
       profileImage: user.profileImage,
       achievements: user.achievements,
       badges,
-      inventory
+      inventory,
     });
   } catch (err) {
     console.error('Error in getPublicProfile:', err);

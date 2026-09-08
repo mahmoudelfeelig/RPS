@@ -1,31 +1,32 @@
 const GameProgress = require('../models/GameProgress');
-const User         = require('../models/User');
-const DailyPuzzle  = require('../models/DailyPuzzle');
+const User = require('../models/User');
+const DailyPuzzle = require('../models/DailyPuzzle');
 const RPSChallenge = require('../models/RPSChallenge');
-const RPS_BOTS     = require('../config/rpsBots');
+const RPS_BOTS = require('../config/rpsBots');
 const { recordRpsMarketOutcome } = require('./marketController');
 const {
   generateMatch3,
   generateSliding,
   generateMemory,
-  generateNQueens
+  generateNQueens,
 } = require('../utils/puzzleGenerator');
 
 const MAX_FRENZY_PER_HOUR = 100;
 const ICON_REWARDS = {
-  '🐭':  5,
+  '🐭': 5,
   '🦉': 10,
-  '🐧':  7,
+  '🐧': 7,
   '🦋': 12,
-  '🐞': 15
+  '🐞': 15,
 };
 const rewardMultiplier = require('../utils/rewardMultiplier');
 const { getUserBuffs, consumeOneShot } = require('../utils/applyEffects');
+const mongoose = require('mongoose');
 
 const RPS_BEATS = {
   rock: 'scissors',
   paper: 'rock',
-  scissors: 'paper'
+  scissors: 'paper',
 };
 
 const HOUSE_TAX_RATE = 0.02;
@@ -40,7 +41,7 @@ const DAILY_ARCADE_REWARDS = {
   'nonogram-row': 280,
   'cipher-vault': 260,
   'mine-clue': 300,
-  'circuit-endpoint': 320
+  'circuit-endpoint': 320,
 };
 
 function parseBet(value) {
@@ -66,11 +67,12 @@ function previousDateKey(dateKey) {
 
 function nextPuzzleStreak(streak = {}, dateKey = todayKey()) {
   const last = streak.lastSolvedDate || null;
-  const current = last === dateKey
-    ? Number(streak.current || 0)
-    : last === previousDateKey(dateKey)
-      ? Number(streak.current || 0) + 1
-      : 1;
+  const current =
+    last === dateKey
+      ? Number(streak.current || 0)
+      : last === previousDateKey(dateKey)
+        ? Number(streak.current || 0) + 1
+        : 1;
   const best = Math.max(Number(streak.best || 0), current);
   const bonus = Math.min(1000, current * 75);
   return {
@@ -78,7 +80,7 @@ function nextPuzzleStreak(streak = {}, dateKey = todayKey()) {
     best,
     lastSolvedDate: dateKey,
     lastReward: bonus,
-    bonus
+    bonus,
   };
 }
 
@@ -107,22 +109,31 @@ function buildDailyArcade(seed) {
     [3, 0, 2, 4, 1],
     [3, 1, 4, 2, 0],
     [4, 1, 3, 0, 2],
-    [4, 2, 0, 3, 1]
+    [4, 2, 0, 3, 1],
   ];
   const queenColumns = queenSolutions[seededNumber(seed, 1, 0, queenSolutions.length - 1)];
   const lockedRows = [seededNumber(seed, 2, 0, 1), seededNumber(seed, 3, 3, 4)];
-  const missingRows = [0, 1, 2, 3, 4].filter(row => !lockedRows.includes(row));
-  const queenAnswer = missingRows.map(row => `${row},${queenColumns[row]}`).join(';');
+  const missingRows = [0, 1, 2, 3, 4].filter((row) => !lockedRows.includes(row));
+  const queenAnswer = missingRows.map((row) => `${row},${queenColumns[row]}`).join(';');
 
-  const knightMoves = [[1, 2], [2, 1], [-1, 2], [-2, 1], [1, -2], [2, -1], [-1, -2], [-2, -1]];
+  const knightMoves = [
+    [1, 2],
+    [2, 1],
+    [-1, 2],
+    [-2, 1],
+    [1, -2],
+    [2, -1],
+    [-1, -2],
+    [-2, -1],
+  ];
   const knightPath = [];
   let knight = { r: seededNumber(seed, 10, 0, 4), c: seededNumber(seed, 11, 0, 4) };
   knightPath.push(knight);
   for (let step = 0; step < 5; step += 1) {
     const legal = knightMoves
       .map(([dr, dc]) => ({ r: knight.r + dr, c: knight.c + dc }))
-      .filter(cell => cell.r >= 0 && cell.r < 5 && cell.c >= 0 && cell.c < 5)
-      .filter(cell => !knightPath.some(prev => prev.r === cell.r && prev.c === cell.c));
+      .filter((cell) => cell.r >= 0 && cell.r < 5 && cell.c >= 0 && cell.c < 5)
+      .filter((cell) => !knightPath.some((prev) => prev.r === cell.r && prev.c === cell.c));
     if (!legal.length) break;
     knight = legal[seededNumber(seed, 12 + step, 0, legal.length - 1)];
     knightPath.push(knight);
@@ -133,7 +144,9 @@ function buildDailyArcade(seed) {
   const hiddenKnightIndex = 3;
   const knightAnswer = `${knightPath[hiddenKnightIndex].r},${knightPath[hiddenKnightIndex].c}`;
 
-  const nonogramBits = Array.from({ length: 9 }, (_, index) => seededNumber(seed, 30 + index, 0, 1));
+  const nonogramBits = Array.from({ length: 9 }, (_, index) =>
+    seededNumber(seed, 30 + index, 0, 1)
+  );
   if (!nonogramBits.some(Boolean)) nonogramBits[seededNumber(seed, 40, 0, 8)] = 1;
   const clues = [];
   let run = 0;
@@ -151,26 +164,32 @@ function buildDailyArcade(seed) {
   const shift = seededNumber(seed, 51, 2, 9);
   const cipherText = cipherWord
     .split('')
-    .map(char => String.fromCharCode(((char.charCodeAt(0) - 97 + shift) % 26) + 97))
+    .map((char) => String.fromCharCode(((char.charCodeAt(0) - 97 + shift) % 26) + 97))
     .join('');
 
   const mineSize = 4;
   const mineBombs = new Set();
   for (let i = 0; mineBombs.size < 4 && i < 20; i += 1) {
-    mineBombs.add(`${seededNumber(seed, 70 + i * 2, 0, 3)},${seededNumber(seed, 71 + i * 2, 0, 3)}`);
+    mineBombs.add(
+      `${seededNumber(seed, 70 + i * 2, 0, 3)},${seededNumber(seed, 71 + i * 2, 0, 3)}`
+    );
   }
   const clueCells = [];
   for (let r = 0; r < mineSize; r += 1) {
     for (let c = 0; c < mineSize; c += 1) {
       if (mineBombs.has(`${r},${c}`)) continue;
-      const count = [-1, 0, 1].flatMap(dr => [-1, 0, 1].map(dc => [dr, dc]))
+      const count = [-1, 0, 1]
+        .flatMap((dr) => [-1, 0, 1].map((dc) => [dr, dc]))
         .filter(([dr, dc]) => dr || dc)
-        .filter(([dr, dc]) => mineBombs.has(`${r + dr},${c + dc}`))
-        .length;
+        .filter(([dr, dc]) => mineBombs.has(`${r + dr},${c + dc}`)).length;
       if (count > 0) clueCells.push({ r, c, count });
     }
   }
-  const mineClue = clueCells[seededNumber(seed, 80, 0, Math.max(0, clueCells.length - 1))] || { r: 0, c: 0, count: 0 };
+  const mineClue = clueCells[seededNumber(seed, 80, 0, Math.max(0, clueCells.length - 1))] || {
+    r: 0,
+    c: 0,
+    count: 0,
+  };
 
   const directions = ['up', 'right', 'down', 'left'];
   const deltas = { up: [-1, 0], right: [0, 1], down: [1, 0], left: [0, -1] };
@@ -178,7 +197,7 @@ function buildDailyArcade(seed) {
   const circuitStart = { ...cursor };
   const route = [];
   for (let i = 0; i < 6; i += 1) {
-    const legal = directions.filter(direction => {
+    const legal = directions.filter((direction) => {
       const [dr, dc] = deltas[direction];
       const next = { r: cursor.r + dr, c: cursor.c + dc };
       return next.r >= 0 && next.r < 5 && next.c >= 0 && next.c < 5;
@@ -193,22 +212,31 @@ function buildDailyArcade(seed) {
     {
       id: 'mini-queens',
       title: 'Mini Queens',
-      description: 'Complete the 5x5 queen layout. No two queens can share a row, column, or diagonal.',
-      prompt: { size: 5, lockedQueens: lockedRows.map(row => ({ row, col: queenColumns[row] })), missingRows },
+      description:
+        'Complete the 5x5 queen layout. No two queens can share a row, column, or diagonal.',
+      prompt: {
+        size: 5,
+        lockedQueens: lockedRows.map((row) => ({ row, col: queenColumns[row] })),
+        missingRows,
+      },
       inputType: 'coordinate-list',
       placeholder: 'row,col; row,col; row,col',
       reward: DAILY_ARCADE_REWARDS['mini-queens'],
-      answer: queenAnswer
+      answer: queenAnswer,
     },
     {
       id: 'knight-gap',
       title: 'Knight Gap',
       description: 'A knight route has one missing stop. Fill the hidden coordinate.',
-      prompt: { size: 5, path: knightPath.map((cell, index) => index === hiddenKnightIndex ? null : cell), hiddenIndex: hiddenKnightIndex + 1 },
+      prompt: {
+        size: 5,
+        path: knightPath.map((cell, index) => (index === hiddenKnightIndex ? null : cell)),
+        hiddenIndex: hiddenKnightIndex + 1,
+      },
       inputType: 'coordinate',
       placeholder: 'row,col',
       reward: DAILY_ARCADE_REWARDS['knight-gap'],
-      answer: knightAnswer
+      answer: knightAnswer,
     },
     {
       id: 'nonogram-row',
@@ -218,7 +246,7 @@ function buildDailyArcade(seed) {
       inputType: 'binary',
       placeholder: 'Example: 101100010',
       reward: DAILY_ARCADE_REWARDS['nonogram-row'],
-      answer: nonogramBits.join('')
+      answer: nonogramBits.join(''),
     },
     {
       id: 'cipher-vault',
@@ -228,17 +256,21 @@ function buildDailyArcade(seed) {
       inputType: 'text',
       placeholder: 'decoded word',
       reward: DAILY_ARCADE_REWARDS['cipher-vault'],
-      answer: cipherWord
+      answer: cipherWord,
     },
     {
       id: 'mine-clue',
       title: 'Mine Clue',
       description: 'Given the hidden mine map, enter the number shown by the selected safe cell.',
-      prompt: { size: mineSize, bombs: [...mineBombs], clueCell: { row: mineClue.r, col: mineClue.c } },
+      prompt: {
+        size: mineSize,
+        bombs: [...mineBombs],
+        clueCell: { row: mineClue.r, col: mineClue.c },
+      },
       inputType: 'number',
       placeholder: 'adjacent mine count',
       reward: DAILY_ARCADE_REWARDS['mine-clue'],
-      answer: String(mineClue.count)
+      answer: String(mineClue.count),
     },
     {
       id: 'circuit-endpoint',
@@ -248,8 +280,8 @@ function buildDailyArcade(seed) {
       inputType: 'coordinate',
       placeholder: 'row,col',
       reward: DAILY_ARCADE_REWARDS['circuit-endpoint'],
-      answer: `${cursor.r},${cursor.c}`
-    }
+      answer: `${cursor.r},${cursor.c}`,
+    },
   ];
 }
 
@@ -271,15 +303,20 @@ function validateMemoryPairs(board, pairs) {
 }
 
 function cloneMatchGrid(grid) {
-  return grid.map(row => row.slice());
+  return grid.map((row) => row.slice());
 }
 
 function isValidMatch3Board(board) {
-  return Array.isArray(board)
-    && board.length === MATCH3_SIZE
-    && board.every(row => Array.isArray(row)
-      && row.length === MATCH3_SIZE
-      && row.every(value => Number.isInteger(value) && value >= 0 && value < MATCH3_TILE_COUNT));
+  return (
+    Array.isArray(board) &&
+    board.length === MATCH3_SIZE &&
+    board.every(
+      (row) =>
+        Array.isArray(row) &&
+        row.length === MATCH3_SIZE &&
+        row.every((value) => Number.isInteger(value) && value >= 0 && value < MATCH3_TILE_COUNT)
+    )
+  );
 }
 
 function deterministicMatchTile(seed, refillIndex, col, slot) {
@@ -342,7 +379,7 @@ function resolveMatch3(grid, seed, refillIndex) {
     const { matched, found } = findMatch3Cells(current);
     if (found === 0) break;
     score += Math.floor(found / 3);
-    const cleared = current.map((row, r) => row.map((cell, c) => matched[r][c] ? null : cell));
+    const cleared = current.map((row, r) => row.map((cell, c) => (matched[r][c] ? null : cell)));
     const gravity = applyMatch3Gravity(cleared, seed, refill);
     current = gravity.grid;
     refill = gravity.refillIndex;
@@ -362,7 +399,14 @@ function normalizeMatch3Coord(coord) {
   const rawC = coord.c ?? coord.col ?? coord[1];
   const r = Number(rawR);
   const c = Number(rawC);
-  if (!Number.isInteger(r) || !Number.isInteger(c) || r < 0 || c < 0 || r >= MATCH3_SIZE || c >= MATCH3_SIZE) {
+  if (
+    !Number.isInteger(r) ||
+    !Number.isInteger(c) ||
+    r < 0 ||
+    c < 0 ||
+    r >= MATCH3_SIZE ||
+    c >= MATCH3_SIZE
+  ) {
     return null;
   }
   return { r, c };
@@ -372,7 +416,10 @@ function hasMatch3Move(grid) {
   for (let r = 0; r < MATCH3_SIZE; r += 1) {
     for (let c = 0; c < MATCH3_SIZE; c += 1) {
       const from = { r, c };
-      const candidates = [{ r: r + 1, c }, { r, c: c + 1 }];
+      const candidates = [
+        { r: r + 1, c },
+        { r, c: c + 1 },
+      ];
       for (const to of candidates) {
         if (to.r >= MATCH3_SIZE || to.c >= MATCH3_SIZE) continue;
         if (findMatch3Cells(swapMatch3(grid, from, to)).found > 0) return true;
@@ -385,7 +432,10 @@ function hasMatch3Move(grid) {
 function generateDeterministicMatch3Board(seed, round) {
   for (let attempt = 0; attempt < 40; attempt += 1) {
     const board = Array.from({ length: MATCH3_SIZE }, (_, r) =>
-      Array.from({ length: MATCH3_SIZE }, (_, c) => hashSeed(`${seed}:board:${round}:${attempt}:${r}:${c}`) % MATCH3_TILE_COUNT)
+      Array.from(
+        { length: MATCH3_SIZE },
+        (_, c) => hashSeed(`${seed}:board:${round}:${attempt}:${r}:${c}`) % MATCH3_TILE_COUNT
+      )
     );
     if (hasMatch3Move(board)) return board;
   }
@@ -457,7 +507,7 @@ function publicPuzzle(puzzle) {
   const output = {
     id: puzzle.id,
     type: puzzle.type,
-    question: { ...(puzzle.question || {}) }
+    question: { ...(puzzle.question || {}) },
   };
   if (puzzle.type === 'memory' && !output.question.board && puzzle.solution?.board) {
     output.question.board = puzzle.solution.board;
@@ -466,20 +516,22 @@ function publicPuzzle(puzzle) {
 }
 
 function applySlidingMoves(board, moves = []) {
-  const current = board.map(row => row.slice());
+  const current = board.map((row) => row.slice());
   const dirs = {
     up: [-1, 0],
     down: [1, 0],
     left: [0, -1],
-    right: [0, 1]
+    right: [0, 1],
   };
   for (const move of moves.slice(0, 80)) {
     const dir = dirs[move];
     if (!dir) return null;
     let blank;
-    current.forEach((row, r) => row.forEach((value, c) => {
-      if (value === 0) blank = [r, c];
-    }));
+    current.forEach((row, r) =>
+      row.forEach((value, c) => {
+        if (value === 0) blank = [r, c];
+      })
+    );
     if (!blank) return null;
     const nr = blank[0] + dir[0];
     const nc = blank[1] + dir[1];
@@ -491,7 +543,7 @@ function applySlidingMoves(board, moves = []) {
 
 function findRpsBot(opponentUsername = '') {
   const normalized = opponentUsername.trim().toLowerCase();
-  return RPS_BOTS.find(bot => bot.name.toLowerCase() === normalized) || null;
+  return RPS_BOTS.find((bot) => bot.name.toLowerCase() === normalized) || null;
 }
 
 function escapeRegex(input = '') {
@@ -503,7 +555,7 @@ async function findRpsOpponent(username = '') {
   if (!normalized) return null;
   return User.findOne({
     username: { $regex: `^${escapeRegex(normalized)}$`, $options: 'i' },
-    status: 'active'
+    status: 'active',
   });
 }
 
@@ -535,14 +587,14 @@ const BLACKJACK_RANKS = {
   Q: 10,
   J: 10,
   T: 10,
-  '9': 9,
-  '8': 8,
-  '7': 7,
-  '6': 6,
-  '5': 5,
-  '4': 4,
-  '3': 3,
-  '2': 2
+  9: 9,
+  8: 8,
+  7: 7,
+  6: 6,
+  5: 5,
+  4: 4,
+  3: 3,
+  2: 2,
 };
 const BLACKJACK_SUITS = ['♠', '♥', '♦', '♣'];
 
@@ -587,9 +639,10 @@ function formatBlackjackState(progress, hideDealerHole = true) {
   const dealerHand = game.dealerHand || [];
   const playerTotal = scoreBlackjackHand(playerHand);
   const dealerVisible = game.finished || !hideDealerHole ? dealerHand : dealerHand.slice(0, 1);
-  const dealerTotal = game.finished || !hideDealerHole
-    ? scoreBlackjackHand(dealerHand)
-    : scoreBlackjackHand(dealerVisible);
+  const dealerTotal =
+    game.finished || !hideDealerHole
+      ? scoreBlackjackHand(dealerHand)
+      : scoreBlackjackHand(dealerVisible);
 
   return {
     active: !!game.active,
@@ -648,7 +701,6 @@ async function resolveBlackjackIfNeeded(user, prog) {
   return false;
 }
 
-
 exports.getProgress = async (req, res) => {
   try {
     let prog = await GameProgress.findOne({ user: req.user.id }).lean();
@@ -660,56 +712,56 @@ exports.getProgress = async (req, res) => {
     const spinnerConfigs = {
       spinner: {
         rewardOptions: [0, 10, 20, 30, 50, 75, 100, 150, 200],
-        weights:       [10, 20, 25, 20, 10, 8, 5, 1, 1]
+        weights: [10, 20, 25, 20, 10, 8, 5, 1, 1],
       },
       spinner12: {
         rewardOptions: [0, 50, 100, 150, 250, 400, 600, 900, 1200],
-        weights:       [15, 25, 30, 15, 10, 4, 1, 0.5, 0.5]
+        weights: [15, 25, 30, 15, 10, 4, 1, 0.5, 0.5],
       },
       spinnerDaily: {
         rewardOptions: [0, 200, 400, 600, 1000, 1500, 2000, 3000, 4000],
-        weights:       [10, 20, 25, 20, 10, 8, 5, 1, 1]
+        weights: [10, 20, 25, 20, 10, 8, 5, 1, 1],
       },
       spinnerWeekly: {
         rewardOptions: [0, 500, 1000, 1500, 2500, 4000, 6000, 8000, 10000],
-        weights:       [10, 20, 25, 20, 10, 8, 5, 1, 1]
-      }
+        weights: [10, 20, 25, 20, 10, 8, 5, 1, 1],
+      },
     };
 
     return res.json({
       unlockedGames: prog.unlockedGames,
       blackjack: formatBlackjackState(prog),
       cooldowns: {
-        spinner:       prog.cooldowns?.spinner?.toISOString()      || null,
-        spinner12:     prog.cooldowns?.spinner12?.toISOString()    || null,
-        spinnerDaily:  prog.cooldowns?.spinnerDaily?.toISOString() || null,
-        spinnerWeekly: prog.cooldowns?.spinnerWeekly?.toISOString()|| null,
-        clickFrenzy:   prog.cooldowns?.clickFrenzy?.toISOString()  || null
+        spinner: prog.cooldowns?.spinner?.toISOString() || null,
+        spinner12: prog.cooldowns?.spinner12?.toISOString() || null,
+        spinnerDaily: prog.cooldowns?.spinnerDaily?.toISOString() || null,
+        spinnerWeekly: prog.cooldowns?.spinnerWeekly?.toISOString() || null,
+        clickFrenzy: prog.cooldowns?.clickFrenzy?.toISOString() || null,
       },
-      spinners:     spinnerConfigs,
+      spinners: spinnerConfigs,
       rpsStats: {
-        wins:  prog.rpsWins  || 0,
-        games: prog.rpsGames || 0
+        wins: prog.rpsWins || 0,
+        games: prog.rpsGames || 0,
       },
       puzzleStats: {
-        wins:    prog.puzzleRushTotal   || 0,
-        resetAt: prog.puzzleRushResetAt?.toISOString() || null
+        wins: prog.puzzleRushTotal || 0,
+        resetAt: prog.puzzleRushResetAt?.toISOString() || null,
       },
       gambling: {
-        won:    prog.gamblingWon || 0,
-        lost:   prog.gamblingLost || 0,
+        won: prog.gamblingWon || 0,
+        lost: prog.gamblingLost || 0,
       },
       plays: {
-        minefield:    (req.user.minefieldPlays    || 0),
-        spinner:      (req.user.spinnerPlays       || 0),
-        clickFrenzy:  (req.user.clickFrenzyPlays   || 0),
-        casino:       (req.user.casinoPlays        || 0),
-        roulette:     (req.user.roulettePlays      || 0),
-        coinFlip:     (req.user.coinFlipPlays      || 0),
-        slots:        (req.user.slotsPlays         || 0),
-        rps:          (req.user.rpsPlays           || 0),
-        puzzleRush:   (prog.puzzleRushTotal       || 0),
-      }
+        minefield: req.user.minefieldPlays || 0,
+        spinner: req.user.spinnerPlays || 0,
+        clickFrenzy: req.user.clickFrenzyPlays || 0,
+        casino: req.user.casinoPlays || 0,
+        roulette: req.user.roulettePlays || 0,
+        coinFlip: req.user.coinFlipPlays || 0,
+        slots: req.user.slotsPlays || 0,
+        rps: req.user.rpsPlays || 0,
+        puzzleRush: prog.puzzleRushTotal || 0,
+      },
     });
   } catch (err) {
     console.error('Error fetching game progress:', err);
@@ -717,22 +769,23 @@ exports.getProgress = async (req, res) => {
   }
 };
 
-
 async function spinTiered(req, res, opts) {
   const { cooldownField, cooldownMs, rewardOptions, weights } = opts;
   try {
     const userId = req.user.id;
-    const prog   = await GameProgress.findOne({ user: userId });
+    const prog = await GameProgress.findOne({ user: userId });
     if (!prog) return res.status(404).json({ message: 'Game progress not found' });
 
-    const now      = new Date();
+    const now = new Date();
     const nextSpin = prog.cooldowns[cooldownField];
     if (nextSpin && now < nextSpin) {
       return res.status(429).json({ message: 'Come back later!' });
     }
 
-    const totalW = weights.reduce((a,b)=>a+b,0);
-    let roll = Math.random() * totalW, cum = 0, reward = 0;
+    const totalW = weights.reduce((a, b) => a + b, 0);
+    let roll = Math.random() * totalW,
+      cum = 0,
+      reward = 0;
     for (let i = 0; i < rewardOptions.length; i++) {
       cum += weights[i];
       if (roll < cum) {
@@ -741,9 +794,7 @@ async function spinTiered(req, res, opts) {
       }
     }
 
-    const user = await User
-      .findById(userId)
-      .populate('inventory.item');
+    const user = await User.findById(userId).populate('inventory.item');
 
     const mult = rewardMultiplier(user);
     await consumeOneShot(user, ['reward-multiplier']);
@@ -757,7 +808,7 @@ async function spinTiered(req, res, opts) {
     return res.json({
       reward,
       nextSpin: prog.cooldowns[cooldownField].toISOString(),
-      balance:  user.balance
+      balance: user.balance,
     });
   } catch (err) {
     console.error(`Spinner ${opts.cooldownField} error:`, err);
@@ -765,42 +816,37 @@ async function spinTiered(req, res, opts) {
   }
 }
 
-
 exports.spinSpinner = (req, res) =>
   spinTiered(req, res, {
     cooldownField: 'spinner',
-    cooldownMs:    1 * 60 * 60 * 1000,          // 1h
+    cooldownMs: 1 * 60 * 60 * 1000, // 1h
     rewardOptions: [0, 10, 20, 30, 50, 75, 100, 150, 200],
-    weights:       [10, 20, 25, 20, 10, 8, 5, 1, 1]
+    weights: [10, 20, 25, 20, 10, 8, 5, 1, 1],
   });
-
 
 exports.spinSpinner12 = (req, res) =>
   spinTiered(req, res, {
     cooldownField: 'spinner12',
-    cooldownMs:    12 * 60 * 60 * 1000,         // 12h
+    cooldownMs: 12 * 60 * 60 * 1000, // 12h
     rewardOptions: [0, 50, 100, 150, 250, 400, 600, 900, 1200],
-    weights:       [15, 25, 30, 15, 10, 4, 1, 0.5, 0.5]
+    weights: [15, 25, 30, 15, 10, 4, 1, 0.5, 0.5],
   });
-
 
 exports.spinSpinnerDaily = (req, res) =>
   spinTiered(req, res, {
     cooldownField: 'spinnerDaily',
-    cooldownMs:    24 * 60 * 60 * 1000,         // 24h
+    cooldownMs: 24 * 60 * 60 * 1000, // 24h
     rewardOptions: [0, 200, 400, 600, 1000, 1500, 2000, 3000, 4000],
-    weights:       [10, 20, 25, 20, 10, 8, 5, 1, 1]
+    weights: [10, 20, 25, 20, 10, 8, 5, 1, 1],
   });
-
 
 exports.spinSpinnerWeekly = (req, res) =>
   spinTiered(req, res, {
     cooldownField: 'spinnerWeekly',
-    cooldownMs:    7 * 24 * 60 * 60 * 1000,     // 7d
+    cooldownMs: 7 * 24 * 60 * 60 * 1000, // 7d
     rewardOptions: [0, 500, 1000, 1500, 2500, 4000, 6000, 8000, 10000],
-    weights:       [10, 20, 25, 20, 10, 8, 5, 1, 1]
+    weights: [10, 20, 25, 20, 10, 8, 5, 1, 1],
   });
-
 
 exports.getFrenzyStats = async (req, res) => {
   try {
@@ -809,17 +855,17 @@ exports.getFrenzyStats = async (req, res) => {
     if (!prog) prog = await GameProgress.create({ user: userId });
 
     const now = new Date();
-    if (!prog.frenzyResetAt || now - prog.frenzyResetAt >= 60*60*1000) {
+    if (!prog.frenzyResetAt || now - prog.frenzyResetAt >= 60 * 60 * 1000) {
       prog.frenzyResetAt = now;
-      prog.frenzyTotal   = 0;
+      prog.frenzyTotal = 0;
       await prog.save();
     }
 
     const user = await User.findById(userId);
     return res.json({
-      frenzyTotal:   prog.frenzyTotal,
+      frenzyTotal: prog.frenzyTotal,
       frenzyResetAt: prog.frenzyResetAt.toISOString(),
-      balance:       user.balance
+      balance: user.balance,
     });
   } catch (err) {
     console.error('Click Frenzy GET error:', err);
@@ -827,27 +873,29 @@ exports.getFrenzyStats = async (req, res) => {
   }
 };
 
-
 exports.playFrenzy = async (req, res) => {
   try {
     const userId = req.user.id;
     let prog = await GameProgress.findOne({ user: userId });
     if (!prog) {
       prog = await GameProgress.create({
-        user:          userId,
-        frenzyTotal:   0,
-        frenzyResetAt: new Date()
+        user: userId,
+        frenzyTotal: 0,
+        frenzyResetAt: new Date(),
       });
     }
 
     const now = Date.now();
     if (!prog.frenzyResetAt || now - prog.frenzyResetAt >= 3600_000) {
       prog.frenzyResetAt = new Date();
-      prog.frenzyTotal   = 0;
+      prog.frenzyTotal = 0;
     }
 
-    const clicks    = Math.max(0, parseInt(req.body.clicks, 10) || 0);
-    const emoji     = req.body.emoji;
+    const clicks = Math.max(0, parseInt(req.body.clicks, 10) || 0);
+    if (clicks < 1) {
+      return res.status(400).json({ message: 'At least one click is required' });
+    }
+    const emoji = req.body.emoji;
     const remaining = MAX_FRENZY_PER_HOUR - prog.frenzyTotal;
     if (remaining <= 0) {
       await prog.save();
@@ -859,7 +907,7 @@ exports.playFrenzy = async (req, res) => {
     await prog.save();
 
     const baseReward = ICON_REWARDS[emoji] || 5;
-    const userDoc    = await User.findById(userId).populate('inventory.item');
+    const userDoc = await User.findById(userId).populate('inventory.item');
 
     const boostedProfit = Math.round(baseReward * (rewardMultiplier(userDoc) - 1));
     await consumeOneShot(userDoc, ['reward-multiplier']);
@@ -872,9 +920,9 @@ exports.playFrenzy = async (req, res) => {
       baseReward,
       boostedProfit,
       reward,
-      frenzyTotal:   prog.frenzyTotal,
+      frenzyTotal: prog.frenzyTotal,
       frenzyResetAt: prog.frenzyResetAt.toISOString(),
-      balance:       userDoc.balance
+      balance: userDoc.balance,
     });
   } catch (err) {
     console.error('Click Frenzy error:', err);
@@ -882,12 +930,9 @@ exports.playFrenzy = async (req, res) => {
   }
 };
 
-
-
-
 exports.playCasino = async (req, res) => {
   try {
-    const userId    = req.user.id;
+    const userId = req.user.id;
     const betAmount = parseFloat(req.body.betAmount);
     if (!betAmount || betAmount <= 0) {
       return res.status(400).json({ message: 'Invalid bet amount' });
@@ -902,7 +947,8 @@ exports.playCasino = async (req, res) => {
     await user.save();
 
     const win = Math.random() < 0.5;
-    let payout = 0, boostedProfit = 0;
+    let payout = 0,
+      boostedProfit = 0;
     if (win) {
       const baseProfit = betAmount; // win pays 2×, so profit = betAmount
       const mult = rewardMultiplier(user);
@@ -911,7 +957,7 @@ exports.playCasino = async (req, res) => {
       user.gamblingWon = (user.gamblingWon || 0) + (baseProfit + boostedProfit);
       await consumeOneShot(user, ['reward-multiplier']);
       await user.save();
-      payout = betAmount*2 + boostedProfit;
+      payout = betAmount * 2 + boostedProfit;
     } else {
       user.gamblingLost = (user.gamblingLost || 0) + betAmount;
       await user.save();
@@ -922,7 +968,7 @@ exports.playCasino = async (req, res) => {
       wager: betAmount,
       payout,
       boostedProfit,
-      balance: user.balance
+      balance: user.balance,
     });
   } catch (err) {
     console.error('Casino error:', err);
@@ -930,13 +976,12 @@ exports.playCasino = async (req, res) => {
   }
 };
 
-
 exports.playRoulette = async (req, res) => {
   try {
     const userId = req.user.id;
     const { betAmount, color } = req.body;
     const amt = parseFloat(betAmount);
-    if (!amt || amt <= 0 || !['red','black','green'].includes(color)) {
+    if (!amt || amt <= 0 || !['red', 'black', 'green'].includes(color)) {
       return res.status(400).json({ message: 'Invalid bet or color' });
     }
 
@@ -948,21 +993,22 @@ exports.playRoulette = async (req, res) => {
     user.roulettePlays = (user.roulettePlays || 0) + 1;
     await user.save();
 
-    const slot = Math.floor(Math.random()*37);
-    let resultColor = slot===0 ? 'green' : slot<=18 ? 'red' : 'black';
-    const win = resultColor===color;
-    let payout=0, boostedProfit=0;
+    const slot = Math.floor(Math.random() * 37);
+    let resultColor = slot === 0 ? 'green' : slot <= 18 ? 'red' : 'black';
+    const win = resultColor === color;
+    let payout = 0,
+      boostedProfit = 0;
     if (win) {
-      const baseProfit = color==='green' ? amt*14 - amt : amt*2 - amt;
+      const baseProfit = color === 'green' ? amt * 14 - amt : amt * 2 - amt;
       const mult = rewardMultiplier(user);
       boostedProfit = Math.round(baseProfit * (mult - 1));
       user.balance += amt + baseProfit + boostedProfit;
-      user.gamblingWon = (user.gamblingWon||0) + (baseProfit+boostedProfit);
+      user.gamblingWon = (user.gamblingWon || 0) + (baseProfit + boostedProfit);
       await consumeOneShot(user, ['reward-multiplier']);
       await user.save();
-      payout = (color==='green'?amt*14:amt*2) + boostedProfit;
+      payout = (color === 'green' ? amt * 14 : amt * 2) + boostedProfit;
     } else {
-      user.gamblingLost = (user.gamblingLost||0) + amt;
+      user.gamblingLost = (user.gamblingLost || 0) + amt;
       await user.save();
     }
 
@@ -973,7 +1019,7 @@ exports.playRoulette = async (req, res) => {
       result: resultColor,
       payout,
       boostedProfit,
-      balance: user.balance
+      balance: user.balance,
     });
   } catch (err) {
     console.error('Roulette error:', err);
@@ -981,13 +1027,12 @@ exports.playRoulette = async (req, res) => {
   }
 };
 
-
 exports.playCoinFlip = async (req, res) => {
   try {
     const userId = req.user.id;
     const { betAmount, guess } = req.body;
     const amt = parseFloat(betAmount);
-    if (!amt || amt <= 0 || !['heads','tails'].includes(guess)) {
+    if (!amt || amt <= 0 || !['heads', 'tails'].includes(guess)) {
       return res.status(400).json({ message: 'Invalid bet or guess' });
     }
 
@@ -1000,19 +1045,20 @@ exports.playCoinFlip = async (req, res) => {
     await user.save();
 
     const result = Math.random() < 0.5 ? 'heads' : 'tails';
-    const win = result===guess;
-    let payout=0, boostedProfit=0;
+    const win = result === guess;
+    let payout = 0,
+      boostedProfit = 0;
     if (win) {
-      const baseProfit = amt*2 - amt;
+      const baseProfit = amt * 2 - amt;
       const mult = rewardMultiplier(user);
       boostedProfit = Math.round(baseProfit * (mult - 1));
       user.balance += amt + baseProfit + boostedProfit;
-      user.gamblingWon = (user.gamblingWon||0) + (baseProfit+boostedProfit);
+      user.gamblingWon = (user.gamblingWon || 0) + (baseProfit + boostedProfit);
       await consumeOneShot(user, ['reward-multiplier']);
       await user.save();
-      payout = amt*2 + boostedProfit;
+      payout = amt * 2 + boostedProfit;
     } else {
-      user.gamblingLost = (user.gamblingLost||0) + amt;
+      user.gamblingLost = (user.gamblingLost || 0) + amt;
       await user.save();
     }
 
@@ -1023,7 +1069,7 @@ exports.playCoinFlip = async (req, res) => {
       result,
       payout,
       boostedProfit,
-      balance: user.balance
+      balance: user.balance,
     });
   } catch (err) {
     console.error('Coin Flip error:', err);
@@ -1031,11 +1077,28 @@ exports.playCoinFlip = async (req, res) => {
   }
 };
 
-
-
- const SYMBOLS = [
-  '🍒','🍋','🍉','⭐','7️⃣','💎','🔔','🍇','🥝','🎰',
-  '💰','🍓','🍊','👑','🃏','🍀','🪙','🛎️','🌈','🔥','💣'
+const SYMBOLS = [
+  '🍒',
+  '🍋',
+  '🍉',
+  '⭐',
+  '7️⃣',
+  '💎',
+  '🔔',
+  '🍇',
+  '🥝',
+  '🎰',
+  '💰',
+  '🍓',
+  '🍊',
+  '👑',
+  '🃏',
+  '🍀',
+  '🪙',
+  '🛎️',
+  '🌈',
+  '🔥',
+  '💣',
 ];
 
 const MULTIPLIERS = {
@@ -1059,7 +1122,7 @@ const MULTIPLIERS = {
   '🪙': 1.5,
   '🌈': 1,
   '🔥': 1,
-  '💣': 0  // bomb = no payout even on match
+  '💣': 0, // bomb = no payout even on match
 };
 
 const SPECIAL_COMBOS = [
@@ -1107,7 +1170,7 @@ const SPECIAL_COMBOS = [
     symbols: ['🃏', '🃏', '🃏'],
     exact: true,
     multiplier: 10,
-  }
+  },
 ];
 
 function matchesCombo(combo, reel) {
@@ -1115,7 +1178,7 @@ function matchesCombo(combo, reel) {
     return JSON.stringify(reel) === JSON.stringify(combo.symbols);
   }
   const reelCopy = [...reel];
-  return combo.symbols.every(sym => {
+  return combo.symbols.every((sym) => {
     const idx = reelCopy.indexOf(sym);
     if (idx !== -1) {
       reelCopy.splice(idx, 1);
@@ -1130,16 +1193,16 @@ exports.playSlots = async (req, res) => {
     const userId = req.user.id;
     const { betAmount } = req.body;
     const amt = parseFloat(betAmount);
-    if (!amt || amt<=0) {
+    if (!amt || amt <= 0) {
       return res.status(400).json({ message: 'Invalid bet amount' });
     }
 
     const user = await User.findById(userId).populate('inventory.item');
     const luckBuffs = await getUserBuffs(user, ['slots-luck']);
-    let guaranteedWin=false;
+    let guaranteedWin = false;
     if (luckBuffs.length) {
-      const boost = luckBuffs.reduce((s,b)=>s+b.effectValue,0);
-      if (Math.random() < boost/100) guaranteedWin=true;
+      const boost = luckBuffs.reduce((s, b) => s + b.effectValue, 0);
+      if (Math.random() < boost / 100) guaranteedWin = true;
       await consumeOneShot(user, ['slots-luck']);
       await user.save();
     }
@@ -1149,49 +1212,65 @@ exports.playSlots = async (req, res) => {
       return res.status(400).json({ message: 'Insufficient funds' });
     }
     user.balance = debitUser.balance;
-    user.slotsPlays = (user.slotsPlays||0) + 1;
+    user.slotsPlays = (user.slotsPlays || 0) + 1;
     await user.save();
 
     let reel;
     if (guaranteedWin) {
-      const winners = Object.entries(MULTIPLIERS).filter(([,m])=>m>0).map(([s])=>s);
-      const pick = winners[Math.floor(Math.random()*winners.length)];
-      reel = [pick,pick,pick];
+      const winners = Object.entries(MULTIPLIERS)
+        .filter(([, m]) => m > 0)
+        .map(([s]) => s);
+      const pick = winners[Math.floor(Math.random() * winners.length)];
+      reel = [pick, pick, pick];
     } else {
-      reel = Array.from({length:3},()=>SYMBOLS[Math.floor(Math.random()*SYMBOLS.length)]);
+      reel = Array.from({ length: 3 }, () => SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)]);
     }
 
-    const counts = reel.reduce((a,s)=>{a[s]=(a[s]||0)+1;return a}, {});
-    let win=false, payout=0, comboName=null;
+    const counts = reel.reduce((a, s) => {
+      a[s] = (a[s] || 0) + 1;
+      return a;
+    }, {});
+    let win = false,
+      payout = 0,
+      comboName = null;
     for (let combo of SPECIAL_COMBOS) {
-      if (matchesCombo(combo,reel) && (!combo.matchTwoOnly||Object.values(counts).includes(2))) {
-        win=true; payout=Math.floor(amt*combo.multiplier); comboName=combo.name; break;
+      if (matchesCombo(combo, reel) && (!combo.matchTwoOnly || Object.values(counts).includes(2))) {
+        win = true;
+        payout = Math.floor(amt * combo.multiplier);
+        comboName = combo.name;
+        break;
       }
     }
     if (!win) {
       for (let sym in counts) {
-        if (counts[sym]===3) { win=true; payout=Math.floor(amt*(MULTIPLIERS[sym]||1)); break; }
+        if (counts[sym] === 3) {
+          win = true;
+          payout = Math.floor(amt * (MULTIPLIERS[sym] || 1));
+          break;
+        }
       }
     }
     if (!win) {
       for (let sym in counts) {
-        if (counts[sym]===2 && MULTIPLIERS[sym]) {
-          win=true; payout=Math.floor(amt*((MULTIPLIERS[sym]||1)/2)); break;
+        if (counts[sym] === 2 && MULTIPLIERS[sym]) {
+          win = true;
+          payout = Math.floor(amt * ((MULTIPLIERS[sym] || 1) / 2));
+          break;
         }
       }
     }
 
-    let boostedProfit=0;
-    if (win && payout>0) {
+    let boostedProfit = 0;
+    if (win && payout > 0) {
       const baseProfit = payout - amt;
       const mult = rewardMultiplier(user);
       boostedProfit = Math.round(baseProfit * (mult - 1));
       user.balance += payout + boostedProfit;
-      user.gamblingWon = (user.gamblingWon||0) + (baseProfit+boostedProfit);
+      user.gamblingWon = (user.gamblingWon || 0) + (baseProfit + boostedProfit);
       await consumeOneShot(user, ['reward-multiplier']);
       await user.save();
     } else if (!win) {
-      user.gamblingLost = (user.gamblingLost||0) + amt;
+      user.gamblingLost = (user.gamblingLost || 0) + amt;
       await user.save();
     }
 
@@ -1201,7 +1280,7 @@ exports.playSlots = async (req, res) => {
       payout,
       boostedProfit,
       combo: comboName,
-      balance: user.balance
+      balance: user.balance,
     });
   } catch (err) {
     console.error('Slots error:', err);
@@ -1209,19 +1288,16 @@ exports.playSlots = async (req, res) => {
   }
 };
 
-
-
-
 exports.getRPSInvites = async (req, res) => {
   try {
     const invites = await RPSChallenge.find({ to: req.user.id })
       .populate('from', 'username')
       .lean();
 
-    const output = invites.map(inv => ({
-      _id:         inv._id,
+    const output = invites.map((inv) => ({
+      _id: inv._id,
       fromUsername: inv.from.username,
-      buyIn:       inv.buyIn
+      buyIn: inv.buyIn,
     }));
 
     return res.json(output);
@@ -1236,7 +1312,7 @@ exports.getRPSStats = async (req, res) => {
     const prog = await GameProgress.findOne({ user: req.user.id }).lean();
     res.json({
       wins: prog?.rpsWins || 0,
-      games: prog?.rpsGames || 0
+      games: prog?.rpsGames || 0,
     });
   } catch (err) {
     console.error('RPS stats error:', err);
@@ -1257,11 +1333,11 @@ exports.getRPSHistory = async (req, res) => {
 exports.getRPSBots = async (req, res) => {
   try {
     return res.json(
-      RPS_BOTS.map(bot => ({
+      RPS_BOTS.map((bot) => ({
         name: bot.name,
         title: bot.title,
         mood: bot.mood,
-        quip: bot.quip
+        quip: bot.quip,
       }))
     );
   } catch (err) {
@@ -1270,13 +1346,12 @@ exports.getRPSBots = async (req, res) => {
   }
 };
 
-
 exports.playRPS = async (req, res) => {
   try {
     const { opponentUsername, buyIn, userChoice } = req.body;
     const requestedOpponent = String(opponentUsername || '').trim();
     const buyInAmount = parseBet(buyIn);
-    if (!requestedOpponent || !buyInAmount || !['rock','paper','scissors'].includes(userChoice)) {
+    if (!requestedOpponent || !buyInAmount || !['rock', 'paper', 'scissors'].includes(userChoice)) {
       return res.status(400).json({ message: 'Invalid parameters' });
     }
 
@@ -1331,7 +1406,7 @@ exports.playRPS = async (req, res) => {
         buyIn: buyInAmount,
         yourPick: userChoice,
         theirPick: botPick,
-        outcome: winner === challengerId ? 'win' : winner === bot.name ? 'lose' : 'draw'
+        outcome: winner === challengerId ? 'win' : winner === bot.name ? 'lose' : 'draw',
       });
 
       await user.save();
@@ -1355,14 +1430,14 @@ exports.playRPS = async (req, res) => {
         payout,
         balance: {
           you: user.balance,
-          opponent: null
-        }
+          opponent: null,
+        },
       });
     }
 
     const invite = await RPSChallenge.findOne({
       from: opponent._id,
-      to: challengerId
+      to: challengerId,
     });
 
     if (invite) {
@@ -1373,24 +1448,27 @@ exports.playRPS = async (req, res) => {
         { _id: challengerId, balance: { $gte: inviteBuyIn } },
         { $inc: { balance: -inviteBuyIn, rpsPlays: 1 } }
       );
-      if (userDebit.modifiedCount !== 1) return res.status(400).json({ message: 'You have insufficient funds' });
+      if (userDebit.modifiedCount !== 1)
+        return res.status(400).json({ message: 'You have insufficient funds' });
 
       const oppDebit = await User.updateOne(
         { _id: opponent._id, balance: { $gte: inviteBuyIn } },
         { $inc: { balance: -inviteBuyIn, rpsPlays: 1 } }
       );
       if (oppDebit.modifiedCount !== 1) {
-        await User.findByIdAndUpdate(challengerId, { $inc: { balance: inviteBuyIn, rpsPlays: -1 } });
+        await User.findByIdAndUpdate(challengerId, {
+          $inc: { balance: inviteBuyIn, rpsPlays: -1 },
+        });
         return res.status(400).json({ message: 'Opponent has insufficient funds' });
       }
 
       const [user, opp] = await Promise.all([
         User.findById(challengerId),
-        User.findById(opponent._id)
+        User.findById(opponent._id),
       ]);
 
       const userPick = userChoice;
-      const oppPick  = invite.choice;
+      const oppPick = invite.choice;
       let winner = null;
       if (userPick !== oppPick) {
         if (RPS_BEATS[userPick] === oppPick) {
@@ -1415,7 +1493,7 @@ exports.playRPS = async (req, res) => {
         );
       } else {
         user.balance += inviteBuyIn;
-        opp.balance  += inviteBuyIn;
+        opp.balance += inviteBuyIn;
         await Promise.all([user.save(), opp.save()]);
       }
 
@@ -1425,10 +1503,10 @@ exports.playRPS = async (req, res) => {
       );
 
       const outcomeUser = winner ? (winner === challengerId ? 'win' : 'lose') : 'draw';
-      const outcomeOpp  = winner ? (winner === opponentId ? 'win' : 'lose') : 'draw';
+      const outcomeOpp = winner ? (winner === opponentId ? 'win' : 'lose') : 'draw';
 
       user.rpsHistory = user.rpsHistory || [];
-      opp.rpsHistory  = opp.rpsHistory  || [];
+      opp.rpsHistory = opp.rpsHistory || [];
 
       user.rpsHistory.push({
         opponent: opponent.username,
@@ -1436,7 +1514,7 @@ exports.playRPS = async (req, res) => {
         buyIn: inviteBuyIn,
         yourPick: userPick,
         theirPick: oppPick,
-        outcome: outcomeUser
+        outcome: outcomeUser,
       });
 
       opp.rpsHistory.push({
@@ -1445,7 +1523,7 @@ exports.playRPS = async (req, res) => {
         buyIn: inviteBuyIn,
         yourPick: oppPick,
         theirPick: userPick,
-        outcome: outcomeOpp
+        outcome: outcomeOpp,
       });
 
       await Promise.all([user.save(), opp.save()]);
@@ -1459,19 +1537,19 @@ exports.playRPS = async (req, res) => {
         opponentType: 'user',
         balance: {
           you: user.balance,
-          opponent: opp.balance
-        }
+          opponent: opp.balance,
+        },
       });
     } else {
       await RPSChallenge.create({
         from: challengerId,
         to: opponent._id,
         buyIn: buyInAmount,
-        choice: userChoice
+        choice: userChoice,
       });
 
       return res.json({
-        message: `Challenge sent to ${opponent.username}. They have 5 minutes to accept by challenging you back.`
+        message: `Challenge sent to ${opponent.username}. They have 5 minutes to accept by challenging you back.`,
       });
     }
   } catch (err) {
@@ -1514,7 +1592,7 @@ exports.startBlackjack = async (req, res) => {
       playerHand: [],
       dealerHand: [],
       finished: false,
-      result: null
+      result: null,
     };
 
     prog.blackjack.playerHand.push(prog.blackjack.deck.pop(), prog.blackjack.deck.pop());
@@ -1527,7 +1605,7 @@ exports.startBlackjack = async (req, res) => {
 
     res.json({
       balance: user.balance,
-      blackjack: formatBlackjackState(prog)
+      blackjack: formatBlackjackState(prog),
     });
   } catch (err) {
     console.error('Blackjack start error:', err);
@@ -1557,7 +1635,7 @@ exports.hitBlackjack = async (req, res) => {
 
     res.json({
       balance: user.balance,
-      blackjack: formatBlackjackState(prog)
+      blackjack: formatBlackjackState(prog),
     });
   } catch (err) {
     console.error('Blackjack hit error:', err);
@@ -1594,7 +1672,7 @@ exports.standBlackjack = async (req, res) => {
 
     res.json({
       balance: user.balance,
-      blackjack: formatBlackjackState(prog)
+      blackjack: formatBlackjackState(prog),
     });
   } catch (err) {
     console.error('Blackjack stand error:', err);
@@ -1637,7 +1715,16 @@ exports.playCrash = async (req, res) => {
     }
 
     await user.save();
-    res.json({ game: 'crash', won, bet, cashoutMultiplier: cashout, crashPoint, payout, tax, balance: user.balance });
+    res.json({
+      game: 'crash',
+      won,
+      bet,
+      cashoutMultiplier: cashout,
+      crashPoint,
+      payout,
+      tax,
+      balance: user.balance,
+    });
   } catch (err) {
     console.error('Crash error:', err);
     res.status(500).json({ message: 'Crash failed' });
@@ -1678,7 +1765,16 @@ exports.playHigherLower = async (req, res) => {
     }
 
     await user.save();
-    res.json({ game: 'higher-lower', current, next, guess, won, payout, tax, balance: user.balance });
+    res.json({
+      game: 'higher-lower',
+      current,
+      next,
+      guess,
+      won,
+      payout,
+      tax,
+      balance: user.balance,
+    });
   } catch (err) {
     console.error('Higher/lower error:', err);
     res.status(500).json({ message: 'Higher/lower failed' });
@@ -1743,9 +1839,9 @@ exports.playBotRace = async (req, res) => {
       .map((name, index) => ({
         name,
         speed: Math.round(60 + Math.random() * 30 + (index % 3) * 3),
-        clutch: Math.round(Math.random() * 20)
+        clutch: Math.round(Math.random() * 20),
       }))
-      .map(entry => ({ ...entry, score: entry.speed + entry.clutch + Math.random() * 15 }))
+      .map((entry) => ({ ...entry, score: entry.speed + entry.clutch + Math.random() * 15 }))
       .sort((a, b) => b.score - a.score);
 
     const winner = results[0].name;
@@ -1783,13 +1879,13 @@ exports.getDailyArcade = async (req, res) => {
 
     const solvedSet = new Set(
       (prog.dailyArcadeSolved || [])
-        .filter(entry => entry.dateKey === dateKey)
-        .map(entry => entry.gameId)
+        .filter((entry) => entry.dateKey === dateKey)
+        .map((entry) => entry.gameId)
     );
 
     res.json({
       dateKey,
-      games: games.map(game => publicDailyArcadeGame(game, solvedSet.has(game.id)))
+      games: games.map((game) => publicDailyArcadeGame(game, solvedSet.has(game.id))),
     });
   } catch (err) {
     console.error('Daily arcade GET error:', err);
@@ -1803,7 +1899,7 @@ exports.solveDailyArcade = async (req, res) => {
     const answer = req.body.answer;
     const dateKey = todayKey();
     const seed = `${dateKey}:${req.user.id}`;
-    const game = buildDailyArcade(seed).find(entry => entry.id === gameId);
+    const game = buildDailyArcade(seed).find((entry) => entry.id === gameId);
     if (!game) {
       return res.status(404).json({ message: 'Daily challenge not found' });
     }
@@ -1811,14 +1907,19 @@ exports.solveDailyArcade = async (req, res) => {
     let normalizedAnswer;
     if (Array.isArray(answer)) {
       normalizedAnswer = answer
-        .map(value => Number(value))
-        .filter(value => Number.isInteger(value))
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value))
         .sort((a, b) => a - b)
         .join(',');
     } else if (['coordinate', 'coordinate-list', 'binary'].includes(game.inputType)) {
-      normalizedAnswer = String(answer || '').trim().toLowerCase().replace(/\s+/g, '');
+      normalizedAnswer = String(answer || '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '');
     } else {
-      normalizedAnswer = String(answer || '').trim().toLowerCase();
+      normalizedAnswer = String(answer || '')
+        .trim()
+        .toLowerCase();
     }
 
     const correct = normalizedAnswer === game.answer;
@@ -1832,9 +1933,9 @@ exports.solveDailyArcade = async (req, res) => {
         user: req.user.id,
         dailyArcadeSolved: {
           $not: {
-            $elemMatch: { dateKey, gameId }
-          }
-        }
+            $elemMatch: { dateKey, gameId },
+          },
+        },
       },
       {
         $push: {
@@ -1842,9 +1943,9 @@ exports.solveDailyArcade = async (req, res) => {
             dateKey,
             gameId,
             reward,
-            solvedAt: new Date()
-          }
-        }
+            solvedAt: new Date(),
+          },
+        },
       },
       { upsert: true }
     );
@@ -1863,28 +1964,21 @@ exports.solveDailyArcade = async (req, res) => {
       correct: true,
       gameId,
       reward,
-      balance: user.balance
+      balance: user.balance,
     });
   } catch (err) {
     console.error('Daily arcade solve error:', err);
     res.status(500).json({ message: 'Failed to solve daily challenge' });
   }
 };
-	
-	
-	
+
 exports.getPuzzleRush = async (req, res) => {
   try {
-    const today = new Date().toISOString().slice(0,10);
+    const today = new Date().toISOString().slice(0, 10);
     let daily = await DailyPuzzle.findOne({ date: today }).lean();
 
     if (!daily) {
-      const puzzles = [
-        generateMatch3(),
-        generateSliding(),
-        generateMemory(),
-        generateNQueens()
-      ];
+      const puzzles = [generateMatch3(), generateSliding(), generateMemory(), generateNQueens()];
       daily = await DailyPuzzle.create({ date: today, puzzles });
     }
 
@@ -1894,21 +1988,20 @@ exports.getPuzzleRush = async (req, res) => {
       prog = await GameProgress.create({ user: req.user.id });
     }
 
-    const now  = new Date();
-    if (!prog.puzzleRushResetAt
-      || now - prog.puzzleRushResetAt >= 24*3600*1000) {
+    const now = new Date();
+    if (!prog.puzzleRushResetAt || now - prog.puzzleRushResetAt >= 24 * 3600 * 1000) {
       prog.puzzleRushResetAt = now;
-      prog.puzzleRushTotal   = 0;
-      prog.puzzleRushSolved   = [];
+      prog.puzzleRushTotal = 0;
+      prog.puzzleRushSolved = [];
       await prog.save();
     }
 
-	    return res.json({
-	      puzzles:    daily.puzzles.map(publicPuzzle),
-	      wins:       prog.puzzleRushTotal,
-	      solved:     prog.puzzleRushSolved,
-	      resetAt:    prog.puzzleRushResetAt.toISOString(),
-	      streak:     prog.puzzleRushStreak || { current: 0, best: 0, lastReward: 0 }
+    return res.json({
+      puzzles: daily.puzzles.map(publicPuzzle),
+      wins: prog.puzzleRushTotal,
+      solved: prog.puzzleRushSolved,
+      resetAt: prog.puzzleRushResetAt.toISOString(),
+      streak: prog.puzzleRushStreak || { current: 0, best: 0, lastReward: 0 },
     });
   } catch (err) {
     console.error('PuzzleRush GET error:', err);
@@ -1916,17 +2009,16 @@ exports.getPuzzleRush = async (req, res) => {
   }
 };
 
-
 exports.playPuzzleRush = async (req, res) => {
   try {
     const { puzzleId, answer } = req.body;
-    const today = new Date().toISOString().slice(0,10);
+    const today = new Date().toISOString().slice(0, 10);
 
     const daily = await DailyPuzzle.findOne({ date: today }).lean();
     if (!daily) {
       return res.status(500).json({ message: 'Daily puzzles not initialized' });
     }
-    const puzzle = daily.puzzles.find(p => p.id === puzzleId);
+    const puzzle = daily.puzzles.find((p) => p.id === puzzleId);
     if (!puzzle) {
       return res.status(404).json({ message: 'Puzzle not found' });
     }
@@ -1934,17 +2026,17 @@ exports.playPuzzleRush = async (req, res) => {
     let prog = await GameProgress.findOne({ user: req.user.id });
     if (!prog) {
       prog = await GameProgress.create({
-        user:               req.user.id,
-        puzzleRushTotal:    0,
-        puzzleRushSolved:   [],
-        puzzleRushResetAt:  Date.now()
+        user: req.user.id,
+        puzzleRushTotal: 0,
+        puzzleRushSolved: [],
+        puzzleRushResetAt: Date.now(),
       });
     }
 
     const now = Date.now();
-    if (!prog.puzzleRushResetAt || now - prog.puzzleRushResetAt >= 24*3600*1000) {
-      prog.puzzleRushTotal   = 0;
-      prog.puzzleRushSolved  = [];
+    if (!prog.puzzleRushResetAt || now - prog.puzzleRushResetAt >= 24 * 3600 * 1000) {
+      prog.puzzleRushTotal = 0;
+      prog.puzzleRushSolved = [];
       prog.puzzleRushResetAt = now;
       await prog.save();
     }
@@ -1955,45 +2047,57 @@ exports.playPuzzleRush = async (req, res) => {
 
     let correct = false;
 
-	    if (puzzle.type === 'match-3') {
-	      const result = validateMatch3Moves(puzzle, answer?.moves);
-	      if (!result.correct && result.message) {
-	        return res.status(400).json({ message: result.message });
-	      }
-	      correct = result.correct;
-	    } else if (puzzle.type === 'sliding') {
-	      const finalBoard = applySlidingMoves(puzzle.question.board, answer?.moves);
-	      correct = JSON.stringify(finalBoard) === JSON.stringify([[1,2,3],[4,5,6],[7,8,0]]);
-	    } else if (puzzle.type === 'memory') {
-	      correct = validateMemoryPairs(puzzle.question.board, answer?.pairs);
-	    } else if (puzzle.type === 'n-queens') {
+    if (puzzle.type === 'match-3') {
+      const result = validateMatch3Moves(puzzle, answer?.moves);
+      if (!result.correct && result.message) {
+        return res.status(400).json({ message: result.message });
+      }
+      correct = result.correct;
+    } else if (puzzle.type === 'sliding') {
+      const finalBoard = applySlidingMoves(puzzle.question.board, answer?.moves);
+      correct =
+        JSON.stringify(finalBoard) ===
+        JSON.stringify([
+          [1, 2, 3],
+          [4, 5, 6],
+          [7, 8, 0],
+        ]);
+    } else if (puzzle.type === 'memory') {
+      correct = validateMemoryPairs(puzzle.question.board, answer?.pairs);
+    } else if (puzzle.type === 'n-queens') {
       const queens = answer.positions;
       const regions = puzzle.question.regions;
       const N = 8;
       if (!Array.isArray(queens) || queens.length !== N) {
         return res.status(400).json({ message: 'Must place exactly 8 queens.' });
       }
-      const rowSet = new Set(), colSet = new Set(), regionSet = new Set();
+      const rowSet = new Set(),
+        colSet = new Set(),
+        regionSet = new Set();
       for (const [r, c] of queens) {
         if (r < 0 || r >= N || c < 0 || c >= N) {
           return res.status(400).json({ message: `Invalid queen position: (${r}, ${c})` });
         }
-        if (rowSet.has(r))    return res.status(400).json({ message: `More than one queen in row ${r+1}` });
-        if (colSet.has(c))    return res.status(400).json({ message: `More than one queen in column ${c+1}` });
+        if (rowSet.has(r))
+          return res.status(400).json({ message: `More than one queen in row ${r + 1}` });
+        if (colSet.has(c))
+          return res.status(400).json({ message: `More than one queen in column ${c + 1}` });
         for (const [r2, c2] of queens) {
-          if ((r !== r2 || c !== c2) && Math.abs(r-r2)===1 && Math.abs(c-c2)===1) {
-            return res.status(400).json({ message: `Diagonal conflict between (${r+1},${c+1}) and (${r2+1},${c2+1})` });
+          if ((r !== r2 || c !== c2) && Math.abs(r - r2) === 1 && Math.abs(c - c2) === 1) {
+            return res.status(400).json({
+              message: `Diagonal conflict between (${r + 1},${c + 1}) and (${r2 + 1},${c2 + 1})`,
+            });
           }
         }
         const reg = regions[r]?.[c];
         if (reg != null && regionSet.has(reg)) {
-          return res.status(400).json({ message: `More than one queen in region ${reg+1}` });
+          return res.status(400).json({ message: `More than one queen in region ${reg + 1}` });
         }
         rowSet.add(r);
         colSet.add(c);
         if (reg != null) regionSet.add(reg);
       }
-      if (rowSet.size===N && colSet.size===N && regionSet.size===N) {
+      if (rowSet.size === N && colSet.size === N && regionSet.size === N) {
         correct = true;
       }
     } else {
@@ -2005,71 +2109,90 @@ exports.playPuzzleRush = async (req, res) => {
     }
 
     const baseReward = puzzle.type === 'logic-grid' ? 2000 : 250;
-    const firstSolveToday = prog.puzzleRushSolved.length === 0;
-    const streakUpdate = firstSolveToday
-      ? nextPuzzleStreak(prog.puzzleRushStreak, today)
-      : { ...(prog.puzzleRushStreak || {}), bonus: 0 };
-    const reward = baseReward + (streakUpdate.bonus || 0);
-    await User.findByIdAndUpdate(req.user.id, {
-      $inc: {
-        balance: reward,
-        puzzleSolves: 1
-      }
-    });
+    const session = await mongoose.startSession();
+    let reward;
+    let streakUpdate;
+    let updatedProg;
+    let userDoc;
+    try {
+      await session.withTransaction(async () => {
+        const currentProg = await GameProgress.findOne({ user: req.user.id }).session(session);
+        if (!currentProg || currentProg.puzzleRushSolved.includes(puzzleId)) {
+          const error = new Error('You already solved that puzzle today');
+          error.status = 409;
+          throw error;
+        }
 
-    prog.puzzleRushTotal += 1;
-    prog.puzzleRushSolved.push(puzzleId);
-    if (firstSolveToday) {
-      prog.puzzleRushStreak = {
-        current: streakUpdate.current,
-        best: streakUpdate.best,
-        lastSolvedDate: streakUpdate.lastSolvedDate,
-        lastReward: streakUpdate.lastReward
-      };
+        const firstSolveToday = currentProg.puzzleRushSolved.length === 0;
+        streakUpdate = firstSolveToday
+          ? nextPuzzleStreak(currentProg.puzzleRushStreak, today)
+          : { ...(currentProg.puzzleRushStreak || {}), bonus: 0 };
+        reward = baseReward + (streakUpdate.bonus || 0);
+
+        currentProg.puzzleRushTotal += 1;
+        currentProg.puzzleRushSolved.push(puzzleId);
+        if (firstSolveToday) {
+          currentProg.puzzleRushStreak = {
+            current: streakUpdate.current,
+            best: streakUpdate.best,
+            lastSolvedDate: streakUpdate.lastSolvedDate,
+            lastReward: streakUpdate.lastReward,
+          };
+        }
+        await currentProg.save({ session });
+        userDoc = await User.findByIdAndUpdate(
+          req.user.id,
+          { $inc: { balance: reward, puzzleSolves: 1 } },
+          { new: true, session }
+        );
+        updatedProg = currentProg.toObject();
+      });
+    } finally {
+      await session.endSession();
     }
-    await prog.save();
-
-    const updatedProg = await GameProgress.findOne({ user: req.user.id }).lean();
-    const userDoc     = await User.findById(req.user.id);
     return res.json({
       reward,
       baseReward,
       streakBonus: streakUpdate.bonus || 0,
       streak: updatedProg.puzzleRushStreak || { current: 0, best: 0, lastReward: 0 },
-      wins:    updatedProg.puzzleRushTotal,
-      solved:  updatedProg.puzzleRushSolved,
+      wins: updatedProg.puzzleRushTotal,
+      solved: updatedProg.puzzleRushSolved,
       resetAt: updatedProg.puzzleRushResetAt.toISOString(),
-      balance: userDoc.balance
+      balance: userDoc.balance,
     });
-
   } catch (err) {
     console.error('PuzzleRush POST error:', err);
-    return res.status(500).json({ message: 'Something went wrong' });
+    return res
+      .status(err.status || 500)
+      .json({ message: err.status ? err.message : 'Something went wrong' });
   }
 };
-
 
 exports.getLeaderboard = async (req, res) => {
   try {
     const [topRps, topPuzzle] = await Promise.all([
-      GameProgress.find().sort({ rpsWins:-1 }).limit(10).populate('user','username').lean(),
-      GameProgress.find().sort({ puzzleRushTotal:-1 }).limit(10).populate('user','username').lean()
+      GameProgress.find().sort({ rpsWins: -1 }).limit(10).populate('user', 'username').lean(),
+      GameProgress.find()
+        .sort({ puzzleRushTotal: -1 })
+        .limit(10)
+        .populate('user', 'username')
+        .lean(),
     ]);
 
     return res.json({
       rps: topRps
-        .filter(p => p.user && p.user.username)
-        .map(p => ({
+        .filter((p) => p.user && p.user.username)
+        .map((p) => ({
           username: p.user.username,
-          wins:     p.rpsWins,
-          games:    p.rpsGames
+          wins: p.rpsWins,
+          games: p.rpsGames,
         })),
-        puzzleRush: topPuzzle
-          .filter(p => p.user && p.user.username)
-          .map(p => ({
-            username: p.user.username,
-            wins:     p.puzzleRushTotal
-          }))
+      puzzleRush: topPuzzle
+        .filter((p) => p.user && p.user.username)
+        .map((p) => ({
+          username: p.user.username,
+          wins: p.puzzleRushTotal,
+        })),
     });
   } catch (err) {
     console.error('Leaderboard error:', err);
@@ -2085,5 +2208,5 @@ exports.__test = {
   nextPuzzleStreak,
   resolveMatch3,
   swapMatch3,
-  validateMatch3Moves
+  validateMatch3Moves,
 };
